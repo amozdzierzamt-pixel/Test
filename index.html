@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Skacząca Żaba – Gminne Baseny Rekreacyjne w Radomyślu Wielkim</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: #0b3954;
+    font-family: 'Segoe UI', 'Trebuchet MS', sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #wrap {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  #gameCanvas {
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.5);
+    max-width: 100vw;
+    max-height: 92vh;
+    cursor: pointer;
+  }
+  #footer {
+    color: #9fd8ef;
+    font-size: 12px;
+    text-align: center;
+    padding: 0 10px 6px;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="gameCanvas" width="420" height="640"></canvas>
+  <div id="footer">© Gminne Baseny Rekreacyjne w Radomyślu Wielkim · sterowanie: spacja / klik / dotyk</div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // ---------- stan gry ----------
+  const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
+  let state = STATE.MENU;
+
+  const GRAVITY = 1500;        // px/s^2
+  const JUMP_VY = -430;        // px/s
+  const PIPE_SPEED = 150;      // px/s
+  const PIPE_GAP = 175;
+  const PIPE_INTERVAL = 1.6;   // s
+  const PIPE_WIDTH = 70;
+  const WATER_H = 90;          // wysokość tafli basenu na dole
+
+  let frog, pipes, particles, clouds;
+  let score = 0;
+  let best = Number(localStorage.getItem('zaba-radomysl-best') || 0);
+  let pipeTimer = 0;
+  let time = 0;
+  let flashAlpha = 0;
+
+  function reset() {
+    frog = { x: W * 0.28, y: H * 0.45, vy: 0, r: 17, rot: 0, blink: 0 };
+    pipes = [];
+    particles = [];
+    score = 0;
+    pipeTimer = PIPE_INTERVAL * 0.6;
+    flashAlpha = 0;
+  }
+
+  function makeClouds() {
+    clouds = [];
+    for (let i = 0; i < 5; i++) {
+      clouds.push({
+        x: Math.random() * W,
+        y: 30 + Math.random() * 140,
+        s: 0.6 + Math.random() * 0.9,
+        v: 8 + Math.random() * 14
+      });
+    }
+  }
+  makeClouds();
+  reset();
+
+  // ---------- sterowanie ----------
+  function flap() {
+    if (state === STATE.MENU) {
+      state = STATE.PLAY;
+      frog.vy = JUMP_VY;
+      return;
+    }
+    if (state === STATE.PLAY) {
+      frog.vy = JUMP_VY;
+      splashParticles(frog.x - 10, frog.y + 10, 4, '#bdf3ff');
+      return;
+    }
+    if (state === STATE.OVER && flashAlpha <= 0.01) {
+      reset();
+      state = STATE.MENU;
+    }
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); flap(); }
+  });
+  canvas.addEventListener('pointerdown', e => { e.preventDefault(); flap(); });
+
+  // ---------- przeszkody: rury zjeżdżalni ----------
+  function spawnPipe() {
+    const margin = 70;
+    const gapY = margin + Math.random() * (H - WATER_H - margin * 2 - PIPE_GAP);
+    pipes.push({ x: W + PIPE_WIDTH, gapY, passed: false });
+  }
+
+  function splashParticles(x, y, n, color) {
+    for (let i = 0; i < n; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 220,
+        vy: -Math.random() * 250,
+        life: 0.5 + Math.random() * 0.4,
+        color
+      });
+    }
+  }
+
+  function gameOver() {
+    state = STATE.OVER;
+    flashAlpha = 0.8;
+    splashParticles(frog.x, frog.y, 18, '#d7f7ff');
+    if (score > best) {
+      best = score;
+      localStorage.setItem('zaba-radomysl-best', String(best));
+    }
+  }
+
+  // ---------- aktualizacja ----------
+  function update(dt) {
+    time += dt;
+    flashAlpha = Math.max(0, flashAlpha - dt * 1.2);
+
+    for (const c of clouds) {
+      c.x -= c.v * dt;
+      if (c.x < -120) { c.x = W + 120; c.y = 30 + Math.random() * 140; }
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += GRAVITY * 0.6 * dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    if (state === STATE.MENU) {
+      frog.y = H * 0.45 + Math.sin(time * 2.4) * 12;
+      frog.rot = Math.sin(time * 2.4) * 0.1;
+      return;
+    }
+    if (state === STATE.OVER) {
+      // żaba wpada do wody
+      if (frog.y < H - WATER_H - frog.r) {
+        frog.vy += GRAVITY * dt;
+        frog.y += frog.vy * dt;
+        frog.rot = Math.min(frog.rot + dt * 5, Math.PI / 2);
+      }
+      return;
+    }
+
+    // PLAY
+    frog.vy += GRAVITY * dt;
+    frog.y += frog.vy * dt;
+    frog.rot = Math.max(-0.45, Math.min(1.2, frog.vy / 600));
+
+    pipeTimer -= dt;
+    if (pipeTimer <= 0) {
+      pipeTimer = PIPE_INTERVAL;
+      spawnPipe();
+    }
+
+    for (let i = pipes.length - 1; i >= 0; i--) {
+      const p = pipes[i];
+      p.x -= PIPE_SPEED * dt;
+      if (!p.passed && p.x + PIPE_WIDTH < frog.x - frog.r) {
+        p.passed = true;
+        score++;
+      }
+      if (p.x < -PIPE_WIDTH - 10) pipes.splice(i, 1);
+
+      // kolizja (AABB vs koło, uproszczona)
+      const fx = frog.x, fy = frog.y, r = frog.r - 3;
+      if (fx + r > p.x && fx - r < p.x + PIPE_WIDTH) {
+        if (fy - r < p.gapY || fy + r > p.gapY + PIPE_GAP) {
+          gameOver();
+          return;
+        }
+      }
+    }
+
+    // sufit i woda
+    if (frog.y < frog.r) { frog.y = frog.r; frog.vy = 0; }
+    if (frog.y > H - WATER_H - frog.r * 0.4) {
+      gameOver();
+    }
+  }
+
+  // ---------- rysowanie ----------
+  function drawBackground() {
+    // niebo
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#7fd4f5');
+    sky.addColorStop(0.65, '#bfeafc');
+    sky.addColorStop(1, '#e8fbff');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // słońce
+    ctx.fillStyle = '#ffe26b';
+    ctx.beginPath();
+    ctx.arc(W - 70, 70, 34, 0, Math.PI * 2);
+    ctx.fill();
+
+    // chmury
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    for (const c of clouds) {
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.scale(c.s, c.s);
+      ctx.beginPath();
+      ctx.arc(0, 0, 22, 0, Math.PI * 2);
+      ctx.arc(24, 6, 17, 0, Math.PI * 2);
+      ctx.arc(-24, 8, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawWater() {
+    const y0 = H - WATER_H;
+    const grad = ctx.createLinearGradient(0, y0, 0, H);
+    grad.addColorStop(0, '#3db4e0');
+    grad.addColorStop(1, '#1273a8');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y0, W, WATER_H);
+
+    // falki
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let x = -20; x <= W + 20; x += 2) {
+      const y = y0 + 6 + Math.sin((x + time * 70) * 0.045) * 4;
+      x === -20 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // krawędź basenu (kafelki)
+    ctx.fillStyle = '#f2f2f2';
+    ctx.fillRect(0, H - 16, W, 16);
+    ctx.fillStyle = '#cfd8dc';
+    for (let x = 0; x < W; x += 28) ctx.fillRect(x, H - 16, 2, 16);
+  }
+
+  function drawPipe(p) {
+    // rury zjeżdżalni basenowej
+    const drawTube = (y, h) => {
+      const grad = ctx.createLinearGradient(p.x, 0, p.x + PIPE_WIDTH, 0);
+      grad.addColorStop(0, '#ff8a3d');
+      grad.addColorStop(0.45, '#ffc04d');
+      grad.addColorStop(1, '#e96e1f');
+      ctx.fillStyle = grad;
+      ctx.fillRect(p.x, y, PIPE_WIDTH, h);
+      // obwódka / kołnierz
+      ctx.fillStyle = '#d35400';
+      const lipY = (y === 0) ? y + h - 22 : y;
+      ctx.fillRect(p.x - 5, lipY, PIPE_WIDTH + 10, 22);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.fillRect(p.x + 10, y, 8, h);
+    };
+    drawTube(0, p.gapY);
+    drawTube(p.gapY + PIPE_GAP, H - WATER_H - (p.gapY + PIPE_GAP));
+  }
+
+  function drawFrog() {
+    ctx.save();
+    ctx.translate(frog.x, frog.y);
+    ctx.rotate(frog.rot);
+
+    // tylne łapki
+    ctx.fillStyle = '#3e8e41';
+    ctx.beginPath();
+    ctx.ellipse(-12, 12, 10, 6, 0.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ciało
+    ctx.fillStyle = '#58b54c';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 20, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // brzuszek
+    ctx.fillStyle = '#cfeab0';
+    ctx.beginPath();
+    ctx.ellipse(2, 6, 12, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // oczy
+    const blink = (Math.sin(time * 3) > 0.97) ? 0.2 : 1;
+    for (const ex of [-7, 9]) {
+      ctx.fillStyle = '#58b54c';
+      ctx.beginPath();
+      ctx.arc(ex, -13, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.ellipse(ex, -13, 5, 5 * blink, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#222';
+      ctx.beginPath();
+      ctx.ellipse(ex + 2, -13, 2.4, 2.4 * blink, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // uśmiech
+    ctx.strokeStyle = '#2e6b30';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(3, -2, 9, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+
+    // koło ratunkowe :)
+    ctx.strokeStyle = '#ff5b5b';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(0, 4, 24, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 6;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.arc(0, 4, 24, i * Math.PI / 2 + 0.18, i * Math.PI / 2 + Math.PI / 2 - 0.18);
+      ctx.stroke();
+      ctx.strokeStyle = (i % 2 === 0) ? '#ff5b5b' : '#fff';
+    }
+
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life * 1.6);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function textCenter(txt, y, size, color, stroke) {
+    ctx.font = `bold ${size}px 'Segoe UI', 'Trebuchet MS', sans-serif`;
+    ctx.textAlign = 'center';
+    if (stroke) {
+      ctx.lineWidth = size / 8;
+      ctx.strokeStyle = stroke;
+      ctx.strokeText(txt, W / 2, y);
+    }
+    ctx.fillStyle = color;
+    ctx.fillText(txt, W / 2, y);
+  }
+
+  function drawUI() {
+    if (state === STATE.PLAY) {
+      textCenter(String(score), 80, 52, '#fff', 'rgba(11,57,84,0.7)');
+      return;
+    }
+
+    if (state === STATE.MENU) {
+      ctx.fillStyle = 'rgba(11,57,84,0.55)';
+      roundRect(30, 95, W - 60, 190, 16);
+      textCenter('SKACZĄCA ŻABA', 150, 36, '#aef58a', 'rgba(0,0,0,0.45)');
+      textCenter('Gminne Baseny Rekreacyjne', 190, 18, '#e6f9ff');
+      textCenter('w Radomyślu Wielkim', 214, 18, '#e6f9ff');
+      textCenter('Kliknij / dotknij / spacja — żaba skacze!', 258, 15, '#ffe26b');
+      if (best > 0) textCenter(`Rekord basenu: ${best}`, H - 130, 18, '#fff', 'rgba(11,57,84,0.6)');
+    }
+
+    if (state === STATE.OVER) {
+      ctx.fillStyle = 'rgba(11,57,84,0.6)';
+      roundRect(40, 170, W - 80, 230, 16);
+      textCenter('PLUSK!', 225, 42, '#ff8a8a', 'rgba(0,0,0,0.45)');
+      textCenter(`Wynik: ${score}`, 280, 26, '#fff');
+      textCenter(`Rekord basenu: ${best}`, 315, 20, '#ffe26b');
+      if (score >= best && score > 0) textCenter('Nowy rekord! 🏆', 348, 18, '#aef58a');
+      textCenter('Kliknij, aby zagrać jeszcze raz', 380, 15, '#cfeefc');
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.fill();
+  }
+
+  function draw() {
+    drawBackground();
+    for (const p of pipes) drawPipe(p);
+    drawWater();
+    drawFrog();
+    drawParticles();
+    drawUI();
+
+    if (flashAlpha > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${flashAlpha})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // ---------- pętla ----------
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
