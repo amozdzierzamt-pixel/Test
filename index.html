@@ -2,7 +2,11 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b3954">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Skacząca Żaba">
 <title>Skacząca Żaba – Gminne Baseny Rekreacyjne w Radomyślu Wielkim</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -11,9 +15,11 @@
     background: #0b3954;
     font-family: 'Segoe UI', 'Trebuchet MS', sans-serif;
     overflow: hidden;
-    touch-action: manipulation;
+    touch-action: none;
+    overscroll-behavior: none;
     -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
   }
   #wrap {
     height: 100%;
@@ -34,7 +40,11 @@
     color: #9fd8ef;
     font-size: 12px;
     text-align: center;
-    padding: 0 10px 6px;
+    padding: 0 10px calc(6px + env(safe-area-inset-bottom));
+  }
+  @media (max-height: 700px) {
+    #footer { display: none; }
+    #gameCanvas { max-height: 100vh; border-radius: 0; }
   }
 </style>
 </head>
